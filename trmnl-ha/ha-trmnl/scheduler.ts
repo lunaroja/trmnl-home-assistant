@@ -18,6 +18,7 @@
  */
 
 import { RefreshWorker, readAccountTiming } from './lib/scheduler/refresh-worker.js'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadSchedules, updateSchedule } from './lib/scheduleStore.js'
@@ -143,7 +144,13 @@ export class Scheduler {
   }
 
   /** Safe refresh timing diagnostics; never includes schedules or credentials. */
-  refreshStatus(): object { return this.#refreshWorker.status() }
+  refreshStatus(): object {
+    const digest = createHash('sha256')
+    for (const file of ['./scheduler.ts', './const.ts', './lib/scheduler/refresh-worker.ts', './lib/scheduler/refresh-planner.ts', './lib/scheduler/schedule-executor.ts']) {
+      digest.update(fs.readFileSync(new URL(file, import.meta.url)))
+    }
+    return { source_sha256: digest.digest('hex'), timezone: process.env.TZ, ...this.#refreshWorker.status() }
+  }
 
   /**
    * Manually executes a schedule by ID, bypassing cron schedule.

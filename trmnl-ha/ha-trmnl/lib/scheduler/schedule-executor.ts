@@ -14,6 +14,7 @@ import {
   buildParams,
 } from './services.js'
 import { sleep } from '../sleep.js'
+import { redactWebhookUrl } from './webhook-delivery.js'
 import {
   SCHEDULER_MAX_RETRIES,
   SCHEDULER_RETRY_DELAY_MS,
@@ -83,8 +84,8 @@ export class ScheduleExecutor {
   /** Formats webhook status for logging */
   #formatWebhookStatus(webhook: WebhookResult | undefined): string {
     if (!webhook) return 'not configured'
-    if (webhook.success) return `${webhook.statusCode} OK → ${webhook.url}`
-    return `FAILED (${webhook.error}) → ${webhook.url}`
+    if (webhook.success) return `${webhook.statusCode} OK`
+    return `FAILED (HTTP ${webhook.statusCode ?? "unknown"})`
   }
 
   /** Retry wrapper for network failures */
@@ -211,7 +212,7 @@ export class ScheduleExecutor {
         url: webhookUrl,
       }
     } catch (err) {
-      const errorMessage = (err as Error).message
+      const errorMessage = redactWebhookUrl((err as Error).message, webhookUrl)
       log.error`Schedule "${schedule.name}" webhook failed: ${errorMessage}`
 
       // Network errors carry no status, so fall back to scraping the message.

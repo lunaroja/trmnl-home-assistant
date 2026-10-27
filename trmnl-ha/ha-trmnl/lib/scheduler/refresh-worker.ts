@@ -111,8 +111,12 @@ export class RefreshWorker {
           || stamp - (saved.state.last_success ?? 0) < Math.min(300, decision.plan.configured_interval) : !decision.plan.due) continue
         saved.state.retry_after = stamp + 180
         await this.#save() // reserve before capture/upload
+        let serverDelay = 0
         try {
           const result = await this.deps.execute(schedule)
+          if (result.webhook?.statusCode === 429 || result.webhook?.statusCode === 503) {
+            serverDelay = Math.min(Math.max((result.webhook.retryAfterMs ?? 300000) / 1000, 0), 86400)
+          }
           if (!result.success || !result.webhook?.attempted || !result.webhook.success) throw new Error()
           saved.state.last_success = this.deps.now().getTime() / 1000
           saved.state.failures = 0; saved.state.retry_after = 0
@@ -122,7 +126,7 @@ export class RefreshWorker {
           saved.state.delivered = [...(saved.state.delivered ?? []), fixed ? fixedKey : decision.plan.key].slice(-32)
         } catch {
           saved.state.failures = Math.min((saved.state.failures ?? 0) + 1, 8)
-          saved.state.retry_after = stamp + Math.min(60 * 2 ** saved.state.failures, 900)
+          saved.state.retry_after = stamp + Math.max(Math.min(60 * 2 ** saved.state.failures, 900), serverDelay)
         }
         await this.#save()
         this.#status[config.schedule_id] = { ...this.#status[config.schedule_id], last_success: saved.state.last_success ?? null,

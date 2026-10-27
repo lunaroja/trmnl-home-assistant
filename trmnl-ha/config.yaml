@@ -1,8 +1,8 @@
-name: "TRMNL HA"
+name: "TRMNL HA (refresh preview)"
 description: "Send dashboard screens to your TRMNL"
-version: "0.11.1-refresh.1"
+version: "0.11.1-refresh.2"
 slug: "trmnl-ha"
-url: "https://github.com/usetrmnl/trmnl-home-assistant"
+url: "https://github.com/lunaroja/trmnl-home-assistant"
 # NOTE: Uncomment after setting up Codenotary signing in CI
 # codenotary: dev@usetrmnl.com
 homeassistant_api: true
