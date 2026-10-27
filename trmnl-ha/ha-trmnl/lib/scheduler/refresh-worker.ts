@@ -73,12 +73,13 @@ export class RefreshWorker {
     if (fixedId) this.#fixedQueue.add(fixedId)
     if (this.#busy) return
     this.#busy = true
+    if (fixedId) this.#fixedQueue.delete(fixedId)
     try {
       await this.#load()
       const schedules = await this.deps.loadSchedules()
       for (const config of this.configs) {
         if (fixedId && config.schedule_id !== fixedId) continue
-        const fixedRequested = this.#fixedQueue.delete(config.schedule_id)
+        const fixedRequested = config.schedule_id === fixedId || this.#fixedQueue.delete(config.schedule_id)
         const schedule = schedules.find(s => s.id === config.schedule_id)
         if (!schedule?.enabled || schedule.interval_minutes != null || !schedule.webhook_url) {
           this.#status[config.schedule_id] = { ready: false, error: 'Requires enabled cron schedule with webhook' }

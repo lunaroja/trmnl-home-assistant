@@ -109,7 +109,7 @@ describe('persistent runtime', () => {
     await h.worker.tick();expect(h.sends()).toBe(0)
     await writeFile(h.file,'bad')
     const restarted=new RefreshWorker([config],h.file,h.deps)
-    await restarted.tick();expect(JSON.stringify(restarted.status())).toContain('unavailable')
+    await restarted.tick('test');expect(JSON.stringify(restarted.status())).toContain('unavailable')
   }))
   test('fixed captures run during sleep, share reservations and survive account failure',async()=>harness(async h=>{
     h.setTime('00:00:00');await h.worker.tick('test');expect(h.sends()).toBe(1)
