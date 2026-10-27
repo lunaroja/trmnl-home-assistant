@@ -582,3 +582,71 @@ Based on [puppet](https://github.com/balloob/home-assistant-addons/tree/main/pup
 - ImageMagick dithering with strategy pattern (from Sharp)
 - Cron scheduler with Web UI and webhooks
 - Expanded from 1 to 24+ device presets
+
+
+## Optional refresh-aware scheduling (fork preview)
+
+Enable this only for TRMNL account devices. Generic cron/interval schedules and
+BYOS keep their existing behavior when `refresh_schedules` is empty (the default).
+The separate **TRMNL account API key** needs read access to each selected device;
+it is neither the screenshot webhook credential nor the Home Assistant token.
+Set `trmnl_account_token` in Supervisor's protected add-on configuration (or
+`TRMNL_ACCOUNT_TOKEN` in the container environment). Never include it in a schedule
+export, URL, issue or log. The account endpoint is fixed to the official HTTPS
+host and verifies certificates even when HA uses a self-signed certificate.
+
+Example add-on options, with illustrative IDs:
+
+```yaml
+refresh_schedules:
+  - schedule_id: schedule_example
+    device_id: 123
+    lead_seconds: 180
+    fallback_interval_seconds: 1800
+    initial_intervals_seconds: [1800, 3600]
+```
+
+Choose an existing enabled schedule with webhook delivery, set its interval to
+null, and use cron only for desired **additional fixed captures** (for example
+`0 0 * * *` for midnight). Select the correct IANA timezone in the add-on options;
+sleep minutes from the device API are interpreted in that timezone. Match the
+device's timezone. The default Docker `TZ=Etc/UTC` environment setting takes
+precedence over the option, so Docker users must also set TZ explicitly. Lead is
+bounded to 60–600 seconds and at most half the device interval. Account polling
+runs every 60 seconds; account read and render time consume part of the lead.
+
+The worker reads the actual hardware ping, refresh interval, daily sleep window
+and one-time sleep. It prepares the next observed-ping prediction and daily wake;
+it never changes device settings or invents another ping when one is overdue.
+A rate change retains the last observed interval as a possible pending timer
+until the next real ping. On a new install the configured initial candidates
+cover the same uncertainty. This can upload an extra image during a transition;
+it cannot wake the device. Missing/invalid/future/regressed pings do not advance
+the anchor. A stale anchor falls back at most once per configured interval while
+awake. First-start account failure waits for a valid account read rather than
+guessing sleep. Later API failures retain the last observed timing and sleep.
+
+The add-on's `/data/refresh-state.json` stores only timing observations, completed
+keys and attempt reservations, atomically, before sending. Success requires a
+confirmed webhook upload. A successful-send floor of up to five minutes and
+exponential failure retry (up to 15 minutes) limit storms. Fixed captures share
+the worker lock/floor/backoff, retry for up to 15 minutes, and still run during
+sleep. A fixed event overlapping account polling is queued. Dynamic captures
+have no random cron jitter. Cron/interval behavior for unselected schedules is
+unchanged. Captures of the same schedule cannot execute concurrently, including
+manual sends. Manual sends remain explicit and do not update timing deduplication.
+
+`GET /api/refresh-status` reports only readiness, ping/target timestamps, interval
+candidates, last delivery and failures. It returns no token, webhook, full device
+or schedule. Like the rest of this add-on's API, it relies on Ingress authentication;
+keep the optional direct host port disabled. Deleting corrupt state is not an
+automatic recovery: the worker fails closed, avoiding an accidental duplicate.
+A crash after remote upload but before local acknowledgment cannot guarantee
+exactly-once delivery. The status API reports cloud upload timing, not proof of a
+physical e-ink redraw.
+
+For migration, stop the previous scheduler before enabling this one. Keep its
+rollback available until an autonomous fork upload and account reanchor have
+been observed. Never run two dynamic schedulers against one webhook. This fork's
+config omits `image` so Supervisor builds the actual checked-out source rather
+than pulling an official image. Upstream submission is pending user review.

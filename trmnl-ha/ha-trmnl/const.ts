@@ -575,3 +575,8 @@ export const SCHEDULER_NETWORK_ERROR_PATTERNS: readonly string[] =
  * Re-exported from config-helpers for backward compatibility
  */
 export const isSchedulerNetworkError = isNetworkError
+
+/** Account credential is separate from HA authentication and never exposed by status. */
+export const TRMNL_ACCOUNT_TOKEN = process.env['TRMNL_ACCOUNT_TOKEN'] ?? fileOptions.trmnl_account_token ?? ''
+/** Optional alignment; ordinary cron/interval schedules remain unchanged. */
+export const REFRESH_SCHEDULES = fileOptions.refresh_schedules ?? []

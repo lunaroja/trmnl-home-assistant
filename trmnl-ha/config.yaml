@@ -1,9 +1,8 @@
 name: "TRMNL HA"
 description: "Send dashboard screens to your TRMNL"
-version: "0.11.1"
+version: "0.11.1-refresh.1"
 slug: "trmnl-ha"
 url: "https://github.com/usetrmnl/trmnl-home-assistant"
-image: ghcr.io/usetrmnl/trmnl-ha-{arch}
 # NOTE: Uncomment after setting up Codenotary signing in CI
 # codenotary: dev@usetrmnl.com
 homeassistant_api: true
@@ -33,6 +32,8 @@ ports_description:
 
 # Configuration options
 options:
+  trmnl_account_token: ""
+  refresh_schedules: []
   access_token: ""
   home_assistant_url: "http://homeassistant:8123"
   timezone: ""
@@ -45,6 +46,14 @@ options:
 
 # Schema for options validation
 schema:
+  trmnl_account_token: password?
+  refresh_schedules:
+    - schedule_id: str
+      device_id: int(1,)
+      lead_seconds: int(60,600)
+      fallback_interval_seconds: int(60,86400)
+      initial_intervals_seconds:
+        - int(60,86400)
   access_token: str
   home_assistant_url: str?
   timezone: str?

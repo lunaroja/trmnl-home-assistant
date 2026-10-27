@@ -47,6 +47,7 @@ export interface ExecutionResult {
  * Orchestrates schedule execution with retry logic.
  */
 export class ScheduleExecutor {
+  #running = new Set<string>()
   #screenshotFn: ScreenshotFunction
   #outputDir: string
 
@@ -57,6 +58,13 @@ export class ScheduleExecutor {
 
   /** Executes schedule with automatic retry on network failures */
   async call(schedule: Schedule): Promise<ExecutionResult> {
+    if (this.#running.has(schedule.id)) throw new Error('Schedule capture already running')
+    this.#running.add(schedule.id)
+    try { return await this.#call(schedule) }
+    finally { this.#running.delete(schedule.id) }
+  }
+
+  async #call(schedule: Schedule): Promise<ExecutionResult> {
     const startTime = Date.now()
     log.info`Running: ${schedule.name}`
 

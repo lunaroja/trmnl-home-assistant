@@ -1,0 +1,141 @@
+/** Persistent refresh worker. Errors and status never contain credentials or raw responses.
+ * @module lib/scheduler/refresh-worker
+ */
+import fs from 'node:fs/promises'
+import https from 'node:https'
+import type { Schedule } from '../../types/domain.js'
+import type { ExecutionResult } from './schedule-executor.js'
+import { planRefresh, validateRefreshConfigs, type DeviceTiming, type RefreshConfig, type RefreshState } from './refresh-planner.js'
+
+interface SavedDevice { timing: DeviceTiming | null; state: RefreshState; identity: number }
+export interface RefreshDeps {
+  readDevice(id: number): Promise<DeviceTiming>
+  execute(schedule: Schedule): Promise<ExecutionResult>
+  loadSchedules(): Promise<Schedule[]>
+  now(): Date
+}
+/** Only the official account host receives this credential. TLS verification is explicit
+ * because the screenshot browser supports private/self-signed HA certificates. */
+export async function readAccountTiming(id: number, token: string): Promise<DeviceTiming> {
+  const body = await new Promise<string>((resolve, reject) => {
+    const req = https.get(`https://trmnl.com/api/devices/${id}`, {
+      headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+      rejectUnauthorized: true,
+    }, response => {
+      let data = ''
+      response.on('data', (chunk: Buffer) => {
+        data += chunk.toString()
+        if (data.length > 1_000_000) req.destroy(new Error('Account read failed'))
+      })
+      response.on('end', () => response.statusCode === 200 ? resolve(data) : reject(new Error('Account read failed')))
+      response.on('error', () => reject(new Error('Account read failed')))
+    })
+    req.setTimeout(15000, () => req.destroy(new Error('Account read timed out')))
+    req.on('error', () => reject(new Error('Account read failed')))
+  })
+  try {
+    const data = (JSON.parse(body) as { data: DeviceTiming & { id: number } }).data
+    if (data?.id !== id) throw new Error()
+    return { refresh_interval: data.refresh_interval, hardware_last_ping_at: data.hardware_last_ping_at,
+      sleep_mode_enabled: data.sleep_mode_enabled, sleep_start_time: data.sleep_start_time,
+      sleep_end_time: data.sleep_end_time, sleep_until: data.sleep_until }
+  } catch { throw new Error('Account read failed') }
+}
+/** One serial worker for account polling and fixed/dynamic delivery. */
+export class RefreshWorker {
+  #saved: Record<string, SavedDevice> = {}
+  #status: Record<string, object> = {}
+  #busy = false
+  #loaded = false
+  #fixedQueue = new Set<string>()
+  constructor(private configs: RefreshConfig[], private file: string, private deps: RefreshDeps) {
+    validateRefreshConfigs(configs)
+  }
+  /** Returns only allowlisted diagnostic fields. */
+  status(): object { return { schedules: structuredClone(this.#status) } }
+  /** Whether this schedule opts into refresh alignment. */
+  owns(id: string): boolean { return this.configs.some(c => c.schedule_id === id) }
+  async #load(): Promise<void> {
+    if (this.#loaded) return
+    try { this.#saved = JSON.parse(await fs.readFile(this.file, 'utf8')) as Record<string, SavedDevice> }
+    catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Refresh state unreadable')
+    }
+    this.#loaded = true
+  }
+  async #save(): Promise<void> {
+    const temp = `${this.file}.tmp`
+    await fs.writeFile(temp, JSON.stringify(this.#saved), { mode: 0o600 })
+    await fs.rename(temp, this.file)
+  }
+  /** Poll once; overlapping ticks are skipped rather than queued. */
+  async tick(fixedId?: string): Promise<void> {
+    if (fixedId) this.#fixedQueue.add(fixedId)
+    if (this.#busy) return
+    this.#busy = true
+    try {
+      await this.#load()
+      const schedules = await this.deps.loadSchedules()
+      for (const config of this.configs) {
+        if (fixedId && config.schedule_id !== fixedId) continue
+        const fixedRequested = this.#fixedQueue.delete(config.schedule_id)
+        const schedule = schedules.find(s => s.id === config.schedule_id)
+        if (!schedule?.enabled || schedule.interval_minutes != null || !schedule.webhook_url) {
+          this.#status[config.schedule_id] = { ready: false, error: 'Requires enabled cron schedule with webhook' }
+          continue
+        }
+        const now = this.deps.now(), stamp = now.getTime() / 1000
+        let saved = this.#saved[config.schedule_id]
+        if (!saved || saved.identity !== config.device_id) saved = { identity: config.device_id, timing: null, state: {} }
+        this.#saved[config.schedule_id] = saved
+        if (fixedRequested) saved.state.pending_fixed = stamp
+        let readOK = true
+        try { saved.timing = await this.deps.readDevice(config.device_id) }
+        catch { readOK = false }
+        // Without any successful account read, do not guess the sleep window.
+        if (!saved.timing && !saved.state.pending_fixed) {
+          this.#status[config.schedule_id] = { ready: false, device_read_ok: false, error: 'Waiting for first account read' }
+          continue
+        }
+        const decision = planRefresh(now, saved.timing, saved.state, config)
+        saved.state = decision.state
+        this.#status[config.schedule_id] = { ready: true, device_read_ok: readOK, checked_at: now.toISOString(), ...decision.plan,
+          last_success: saved.state.last_success ?? null, last_delivery_reason: saved.state.last_delivery_reason ?? null,
+          last_delivery_target: saved.state.last_delivery_target ?? null, failures: saved.state.failures ?? 0 }
+        await this.#save()
+        // Fixed cron still runs during sleep; it shares the lock, floor and backoff.
+        if (saved.state.pending_fixed && stamp - saved.state.pending_fixed > 900) delete saved.state.pending_fixed
+        const fixed = saved.state.pending_fixed !== undefined
+        const fixedKey = `fixed:${Math.floor((saved.state.pending_fixed ?? stamp) / 60)}`
+        if (fixed ? (saved.state.delivered ?? []).includes(fixedKey) || stamp < (saved.state.retry_after ?? 0)
+          || stamp - (saved.state.last_success ?? 0) < Math.min(300, decision.plan.configured_interval) : !decision.plan.due) continue
+        saved.state.retry_after = stamp + 180
+        await this.#save() // reserve before capture/upload
+        try {
+          const result = await this.deps.execute(schedule)
+          if (!result.success || !result.webhook?.attempted || !result.webhook.success) throw new Error()
+          saved.state.last_success = this.deps.now().getTime() / 1000
+          saved.state.failures = 0; saved.state.retry_after = 0
+          saved.state.last_delivery_reason = fixed ? 'fixed' : decision.plan.reason
+          saved.state.last_delivery_target = fixed ? saved.state.pending_fixed! : decision.plan.target
+          delete saved.state.pending_fixed
+          saved.state.delivered = [...(saved.state.delivered ?? []), fixed ? fixedKey : decision.plan.key].slice(-32)
+        } catch {
+          saved.state.failures = Math.min((saved.state.failures ?? 0) + 1, 8)
+          saved.state.retry_after = stamp + Math.min(60 * 2 ** saved.state.failures, 900)
+        }
+        await this.#save()
+        this.#status[config.schedule_id] = { ...this.#status[config.schedule_id], last_success: saved.state.last_success ?? null,
+          last_delivery_reason: saved.state.last_delivery_reason ?? null, last_delivery_target: saved.state.last_delivery_target ?? null,
+          failures: saved.state.failures ?? 0, retry_after: saved.state.retry_after ?? 0 }
+      }
+    } catch {
+      // Persistence/load failures fail closed; no upload without a saved reservation.
+      for (const c of this.configs) this.#status[c.schedule_id] = { ready: false, error: 'Refresh worker unavailable' }
+    } finally {
+      this.#busy = false
+      const queued = this.#fixedQueue.values().next().value as string | undefined
+      if (queued) await this.tick(queued)
+    }
+  }
+}

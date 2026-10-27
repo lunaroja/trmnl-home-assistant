@@ -67,6 +67,7 @@ const MIME_TYPES: Record<string, string> = {
 
 /** Scheduler interface for manual execution */
 interface Scheduler {
+  refreshStatus?(): object
   executeNow(
     scheduleId: string,
   ): Promise<{ success: boolean; savedPath: string; webhook?: WebhookResult }>
@@ -166,6 +167,12 @@ export class HttpRouter {
     // Serve UI at root UNLESS there's a 'url' param (generic screenshot mode)
     if (pathname === '/' && !requestUrl.searchParams.has('url')) {
       await handleUIRequest(response, requestUrl)
+      return true
+    }
+
+    if (pathname === '/api/refresh-status' && request.method === 'GET') {
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify(this.#scheduler?.refreshStatus?.() ?? { schedules: {} }))
       return true
     }
 
