@@ -33,14 +33,24 @@ export async function readAccountTiming(id: number, token: string): Promise<Devi
     req.setTimeout(15000, () => req.destroy(new Error('Account read timed out')))
     req.on('error', () => reject(new Error('Account read failed')))
   })
-  try {
-    const data = (JSON.parse(body) as { data: DeviceTiming & { id: number } }).data
-    if (data?.id !== id) throw new Error()
-    return { refresh_interval: data.refresh_interval, hardware_last_ping_at: data.hardware_last_ping_at,
-      sleep_mode_enabled: data.sleep_mode_enabled, sleep_start_time: data.sleep_start_time,
-      sleep_end_time: data.sleep_end_time, sleep_until: data.sleep_until }
-  } catch { throw new Error('Account read failed') }
+  try { return timingFromAccount(JSON.parse(body) as unknown, id) }
+  catch { throw new Error('Account read failed') }
 }
+/** Validate and allowlist account responses before retaining them across outages. */
+export function timingFromAccount(response: unknown, id: number): DeviceTiming {
+  const data = (response as { data?: DeviceTiming & { id?: number } })?.data
+  const minute = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 1440
+  if (data?.id !== id || typeof data.refresh_interval !== 'number'
+    || !Number.isInteger(data.refresh_interval) || data.refresh_interval < 60 || data.refresh_interval > 86400
+    || typeof data.sleep_mode_enabled !== 'boolean'
+    || (data.sleep_mode_enabled && (!minute(data.sleep_start_time) || !minute(data.sleep_end_time)))) {
+    throw new Error('Account read failed')
+  }
+  return { refresh_interval: data.refresh_interval, hardware_last_ping_at: data.hardware_last_ping_at,
+    sleep_mode_enabled: data.sleep_mode_enabled, sleep_start_time: data.sleep_start_time,
+    sleep_end_time: data.sleep_end_time, sleep_until: data.sleep_until }
+}
+
 /** One serial worker for account polling and fixed/dynamic delivery. */
 export class RefreshWorker {
   #saved: Record<string, SavedDevice> = {}

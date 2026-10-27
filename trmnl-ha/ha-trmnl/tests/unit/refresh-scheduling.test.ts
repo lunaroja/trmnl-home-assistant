@@ -3,7 +3,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { planRefresh, validateRefreshConfigs, type RefreshConfig, type RefreshState, type DeviceTiming } from '../../lib/scheduler/refresh-planner.js'
-import { RefreshWorker, type RefreshDeps } from '../../lib/scheduler/refresh-worker.js'
+import { RefreshWorker, timingFromAccount, type RefreshDeps } from '../../lib/scheduler/refresh-worker.js'
 import type { Schedule } from '../../types/domain.js'
 
 process.env.TZ = 'America/New_York'
@@ -14,6 +14,12 @@ const saved: RefreshState = { ping: at('12:00:00').getTime()/1000, latched_inter
 const run = (time: string, d: DeviceTiming | null = device, s: RefreshState = saved) => planRefresh(at(time), d, s, config)
 
 describe('refresh planner', () => {
+  test('account readback allowlists fields and rejects incomplete sleep settings', () => {
+    const data = { ...device, id:1, private_account_field:'PRIVATE_ACCOUNT' }
+    expect(JSON.stringify(timingFromAccount({data},1))).not.toContain('PRIVATE_ACCOUNT')
+    expect(() => timingFromAccount({data},2)).toThrow('Account read failed')
+    expect(() => timingFromAccount({data:{...data,sleep_end_time:undefined}},1)).toThrow('Account read failed')
+  })
   test('bounded lead, deduplication and no synthetic anchor', () => {
     expect(run('12:26:59').plan.due).toBe(false)
     const due = run('12:27:00')
