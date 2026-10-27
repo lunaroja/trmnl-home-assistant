@@ -610,8 +610,8 @@ Choose an existing enabled schedule with webhook delivery, set its interval to
 null, and use cron only for desired **additional fixed captures** (for example
 `0 0 * * *` for midnight). Select the correct IANA timezone in the add-on options;
 sleep minutes from the device API are interpreted in that timezone. Match the
-device's timezone. The default Docker `TZ=Etc/UTC` environment setting takes
-precedence over the option, so Docker users must also set TZ explicitly. Lead is
+device's timezone. Supervisor timezone options override the image default; standalone Docker
+users set TZ explicitly (environment takes precedence there). Lead is
 bounded to 60–600 seconds and at most half the device interval. Account polling
 runs every 60 seconds; account read and render time consume part of the lead.
 

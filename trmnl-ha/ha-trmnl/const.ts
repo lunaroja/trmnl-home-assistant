@@ -161,7 +161,10 @@ if (hasEnvConfig) {
  * Valid values: IANA timezone names like "America/New_York", "Europe/London"
  * @see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
  */
-const timezone = process.env.TZ ?? options.timezone ?? fileOptions.timezone
+// Supervisor options must override the image's default TZ=Etc/UTC.
+const timezone = detectIsAddOn(process.env, optionsFile)
+  ? fileOptions.timezone || process.env.TZ
+  : process.env.TZ ?? fileOptions.timezone
 if (timezone) {
   // Validate timezone - invalid values silently fall back to UTC
   const isValid = isValidTimezone(timezone)
