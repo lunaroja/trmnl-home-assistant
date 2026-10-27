@@ -2,6 +2,14 @@
 
 # TRMNL HA
 
+> **Refresh scheduling preview fork:** this fork adds optional capture timing from
+> actual TRMNL account pings and refresh/sleep settings. See
+> [configuration and migration guidance](trmnl-ha/DOCS.md#optional-refresh-aware-scheduling-fork-preview).
+> Install this preview by adding `https://github.com/lunaroja/trmnl-home-assistant`
+> to Supervisor; it builds source locally. The upstream installation instructions
+> below continue to describe the official release. This is a tested preview pending
+> owner review, with no upstream submission yet.
+
 ![TRMNL Logo](https://github.com/usetrmnl/trmnl-home-assistant/blob/main/trmnl-ha/logo.png?raw=true)
 
 Send Home Assistant dashboard screenshots to your TRMNL e-ink display with advanced dithering optimized for e-paper screens.
