@@ -78,6 +78,17 @@ interface MockResponse {
 }
 
 describe('HttpRouter', () => {
+  it('refresh status is read-only and excludes stored schedule secrets', async () => {
+    const localRouter = new HttpRouter({} as BrowserFacade, {
+      executeNow: async () => { throw new Error('Must not execute') },
+      refreshStatus: () => ({ schedules: { test: { ready: true } } }),
+    }, { loadSchedules: async () => { throw new Error('Must not read secrets') } })
+    let body = ''
+    await localRouter.route({ method: 'GET' } as IncomingMessage, {
+      setHeader: () => {}, end: (data: string) => { body = data },
+    } as unknown as ServerResponse, new URL('http://localhost/api/refresh-status'))
+    expect(JSON.parse(body)).toEqual({ schedules: { test: { ready: true } } })
+  })
   let router: HttpRouter
   let mockFacade: BrowserFacade
   let mockScheduler: { executeNow: (id: string) => Promise<unknown> }
