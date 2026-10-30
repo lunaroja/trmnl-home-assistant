@@ -28,6 +28,17 @@ describe('refresh planner', () => {
     expect(run('13:05:00').state.ping).toBe(saved.ping)
     expect(run('13:05:00').plan.reason).toBe('stale_fallback')
   })
+  test('missed prediction falls back after one interval despite fresh moving pings', () => {
+    const prior = { ...saved, last_success: at('11:30:00').getTime()/1000 }
+    const overdue = run('12:05:00', device, prior)
+    expect(overdue.plan.stale_ping).toBe(false)
+    expect(overdue.plan.reason).toBe('scheduled_fallback')
+    expect(overdue.plan.due).toBe(true)
+    expect(run('12:05:00', device, { ...prior, retry_after: at('12:10:00').getTime()/1000 }).plan.due).toBe(false)
+    expect(run('12:05:00', device, { ...prior, last_success: at('12:00:00').getTime()/1000 }).plan.due).toBe(false)
+    expect(run('12:05:00', { ...device, refresh_interval: 3600 }, prior).plan.due).toBe(false)
+    expect(run('23:30:00', device, prior).plan.due).toBe(false)
+  })
   test('rate changes retain pending old rate until a real new ping', () => {
     const changed = run('12:27:00', { ...device, refresh_interval: 3600 })
     expect(changed.plan.candidate_intervals).toEqual([1800,3600])

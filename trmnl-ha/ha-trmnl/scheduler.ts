@@ -143,6 +143,9 @@ export class Scheduler {
     this.#jobManager.stopAll()
   }
 
+  /** Progress health for the existing process watchdog, independent of cloud availability. */
+  refreshHealth(): ReturnType<RefreshWorker['health']> { return this.#refreshWorker.health() }
+
   /** Safe refresh timing diagnostics; never includes schedules or credentials. */
   refreshStatus(): object {
     const digest = createHash('sha256')

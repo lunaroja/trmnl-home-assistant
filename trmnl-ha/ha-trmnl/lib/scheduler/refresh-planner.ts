@@ -114,8 +114,11 @@ export function planRefresh(now: Date, device: DeviceTiming | null, saved: Refre
   const lead = Math.min(config.lead_seconds, Math.floor(interval / 2))
   let due = key !== 'waiting' && target - lead <= stamp && target > stamp
   const stale = !anchor || stamp > anchor + Math.max(...rates) + 120
-  if (stale && awakeAt(stamp) && !due && stamp - (state.last_success ?? 0) >= interval) {
-    target = stamp; key = `fallback:${Math.floor(stamp / interval)}`; reason = 'stale_fallback'; due = true
+  // A fresh ping must never postpone recovery of an overdue image. Use elapsed
+  // delivery time as the schedule fallback, independently of prediction freshness.
+  if ((stale || state.last_success !== undefined) && awakeAt(stamp) && !due
+    && stamp - (state.last_success ?? 0) >= interval) {
+    target = stamp; key = `fallback:${Math.floor(stamp / interval)}`; reason = stale ? 'stale_fallback' : 'scheduled_fallback'; due = true
   }
   if (stamp - (state.last_success ?? 0) < Math.min(300, interval) || stamp < (state.retry_after ?? 0)) due = false
   return { plan: { due, reason, key, target, capture_at: target - lead,

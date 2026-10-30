@@ -216,6 +216,34 @@ describe('HttpRouter', () => {
   // ==========================================================================
 
   describe('GET /health', () => {
+    it('returns 503 for a stalled refresh worker even with a healthy browser', async () => {
+      router.setScheduler({
+        executeNow: async () => ({ success: true, savedPath: 'unused' }),
+        refreshHealth: () => ({ healthy: false, enabled: true, busy: true,
+          phase: 'reading-device', cycle_started_at: '2026-10-27T12:00:00Z',
+          last_completed_at: '2026-10-27T11:59:00Z', last_progress_at: '2026-10-27T12:00:00Z',
+          reason: 'Refresh cycle exceeded five minutes' }),
+      })
+      await router.route(mockRequest as unknown as IncomingMessage,
+        mockResponse as unknown as ServerResponse, new URL('http://localhost/health'))
+      expect(mockResponse.statusCode).toBe(503)
+      const body = JSON.parse(String(mockResponse.body)) as { scheduler: { phase: string }; browser: { healthy: boolean } }
+      expect(body.scheduler.phase).toBe('reading-device')
+      expect(body.browser.healthy).toBe(true)
+    })
+
+    it('keeps healthy polling eligible for 200 despite an account outage', async () => {
+      router.setScheduler({
+        executeNow: async () => ({ success: true, savedPath: 'unused' }),
+        refreshHealth: () => ({ healthy: true, enabled: true, busy: false,
+          phase: 'idle', cycle_started_at: null, last_completed_at: '2026-10-27T12:00:00Z',
+          last_progress_at: '2026-10-27T12:00:00Z' }),
+      })
+      await router.route(mockRequest as unknown as IncomingMessage,
+        mockResponse as unknown as ServerResponse, new URL('http://localhost/health'))
+      expect(mockResponse.statusCode).toBe(200)
+    })
+
     it('returns 200 when browser is healthy', async () => {
       ;(mockFacade as { checkHealth: () => { healthy: boolean } }).checkHealth =
         () => ({
