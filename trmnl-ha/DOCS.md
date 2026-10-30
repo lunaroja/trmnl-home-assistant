@@ -645,6 +645,28 @@ A crash after remote upload but before local acknowledgment cannot guarantee
 exactly-once delivery. The status API reports cloud upload timing, not proof of a
 physical e-ink redraw.
 
+Account reads have a 15-second total deadline covering DNS, connection, TLS and
+the complete response body; timeout cancels the request rather than merely
+discarding its eventual result. A response that ends prematurely is also a failed
+read. Temporary account failures retain the last observed timing and sleep as
+described above, without making the add-on unhealthy just because the cloud is down.
+
+Worker diagnostics include the current phase, cycle start, last progress and last
+completed poll. `/health` returns HTTP 503 if an aligned worker cycle exceeds five
+minutes or polling stops for more than three minutes. This health result joins the
+existing browser health result. Supervisor's enabled add-on watchdog can then
+restart the process. For standalone Docker, an unhealthy status alone does not
+restart a container: configure your orchestrator to act on health failures.
+Ordinary cron/BYOS installations with no aligned schedules keep their previous
+health behavior. Overnight sleep does not count as stalled work: polling continues
+without requiring image uploads.
+
+A timed-out capture is **not** unlocked to start a replacement upload in the same
+process. The lock stays held until the operation settles or the watchdog replaces
+the process, avoiding late completion racing a second capture. This still cannot
+remove the existing upload-before-local-acknowledgment ambiguity. Phase diagnostics
+help locate a future stall; they do not prove which operation caused an earlier one.
+
 For migration, stop the previous scheduler before enabling this one. Keep its
 rollback available until an autonomous upload and account reanchor have been observed. Never run
 two dynamic schedulers against one webhook.
