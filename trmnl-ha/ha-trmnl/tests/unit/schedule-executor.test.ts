@@ -25,6 +25,7 @@ import {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { captureLogs } from '../helpers/log-capture.js'
 import { ScheduleExecutor } from '../../lib/scheduler/schedule-executor.js'
 import * as sleepModule from '../../lib/sleep.js'
 import {
@@ -173,5 +174,35 @@ describe('ScheduleExecutor — webhook failure reporting', () => {
       statusCode: 503,
     })
     expect(result.webhook!.retryAfterMs).toBeUndefined()
+  })
+})
+
+
+describe('ScheduleExecutor credential-safe logs', () => {
+  for (const status of [200, 503]) {
+    it(`keeps the private upload URL out of completion logs for HTTP ${status}`, async () => {
+      const logs = await captureLogs()
+      const url = 'https://example.invalid/api/custom_plugins/SYNTHETIC-WRITE-CREDENTIAL'
+      try {
+        mockFetch({ok: status === 200, status, statusText: status === 200 ? 'OK' : 'Unavailable',
+          text: async () => `Response from ${url}`})
+        const result = await createExecutor(async () => Buffer.from('png')).call(buildSchedule({webhook_url: url}))
+        expect(result.webhook?.success).toBe(status === 200)
+        expect(logs.contains('Completed:')).toBe(true)
+        expect(logs.contains(status === 200 ? '200 OK' : 'FAILED (HTTP 503)')).toBe(true)
+        expect(logs.contains('SYNTHETIC-WRITE-CREDENTIAL')).toBe(false)
+      } finally { await logs.stop(); restoreFetch() }
+    })
+  }
+  it('redacts a private URL echoed by a transport error', async () => {
+    const logs = await captureLogs()
+    const url = 'https://example.invalid/api/custom_plugins/SYNTHETIC-ERROR-CREDENTIAL'
+    try {
+      globalThis.fetch = mock(async () => { throw new Error(`HTTP 503 upload failed: ${url}`) }) as unknown as typeof fetch
+      const result = await createExecutor(async () => Buffer.from('png')).call(buildSchedule({webhook_url: url}))
+      expect(result.webhook?.success).toBe(false)
+      expect(logs.contains('Completed:')).toBe(true)
+      expect(logs.contains('SYNTHETIC-ERROR-CREDENTIAL')).toBe(false)
+    } finally { await logs.stop(); restoreFetch() }
   })
 })
