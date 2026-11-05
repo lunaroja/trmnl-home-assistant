@@ -13,8 +13,12 @@ for HTTP 200, HTTP 503 and an echoed transport error using synthetic credentials
 UI delivery responses and upload requests are unchanged.
 
 This security fix is deliberately separate from the upstream scheduling design.
-It is authorized for the fork only; a future upstream PR requires separate review.
-Remove this patch after a released upstream fix is adopted and log-audited.
+The separately authorized broader review is submitted as
+[upstream PR #135](https://github.com/usetrmnl/trmnl-home-assistant/pull/135).
+It also covers echoed response/status/error details, browser diagnostics and BYOS
+authentication logs. This fork still carries the narrower patch described above;
+the submitted contribution has not been adopted here. Remove this patch after a
+released upstream fix is adopted and log-audited.
 
 ## Build metadata
 
