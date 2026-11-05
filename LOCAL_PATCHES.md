@@ -18,8 +18,16 @@ Remove this patch after a released upstream fix is adopted and log-audited.
 
 ## Build metadata
 
-Supervisor config selects this fork and omits the official `image` so it builds
-patched source. The add-on/package version is `0.12.0-local.1`. Root bootstrap
-files and this README notice are personal fork metadata, excluded from any later
+Supervisor config selects versioned fork images at
+`ghcr.io/lunaroja/trmnl-ha-{arch}:0.12.0-local.2`. The existing Release workflow
+builds both supported architectures from the `v0.12.0-local.2` release tag.
+The source is the same patched v0.12.0 runtime as `0.12.0-local.1`; this release
+changes packaging and version metadata only. Supervisor can pull the published
+image during recovery instead of embedding a locally built image in every
+backup. Publish and verify anonymous pulls for both architecture images before
+updating a live installation. Keep version tags available for recovery.
+
+Do not use the upstream image while its credential-log issue remains. Root
+bootstrap files and these fork packaging notes are excluded from a later
 security contribution. Household configuration and verification stay in the
-private homeassistant repository, issue #298.
+private homeassistant repository, issues #298 and #333.

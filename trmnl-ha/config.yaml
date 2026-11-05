@@ -1,9 +1,10 @@
 name: "TRMNL HA (local log fix)"
 description: "Send dashboard screens to your TRMNL"
-version: "0.12.0-local.1"
+version: "0.12.0-local.2"
 slug: "trmnl-ha"
 url: "https://github.com/lunaroja/trmnl-home-assistant"
-# Source-built so the documented local credential-log patch is included.
+image: ghcr.io/lunaroja/trmnl-ha-{arch}
+# Published from this fork; preserves the documented credential-log patch.
 # NOTE: Uncomment after setting up Codenotary signing in CI
 # codenotary: dev@usetrmnl.com
 homeassistant_api: true

@@ -2,8 +2,8 @@
 
 # TRMNL HA
 
-> **Local build of upstream v0.12.0:** server-provided check-in alignment is
-> unchanged from the release. This source build carries the isolated credential-log
+> **Patched images of upstream v0.12.0:** server-provided check-in alignment is
+> unchanged from the release. This fork image carries the isolated credential-log
 > patch documented in [LOCAL_PATCHES.md](LOCAL_PATCHES.md). The former account
 > polling scheduler is retired. Add this fork to Supervisor only when that local
 > patch is needed; upstream instructions below describe the official image.
