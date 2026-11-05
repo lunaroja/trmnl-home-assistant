@@ -48,6 +48,7 @@ import {
   isNetworkError,
   parseOptionsFile,
   resolveNavigationTimeout,
+  resolveCheckInLeadSeconds,
   OptionsParseError,
   type Options,
   NETWORK_ERROR_PATTERNS as SCHEDULER_NETWORK_ERROR_PATTERNS_IMPORT,
@@ -145,6 +146,7 @@ const options: Options = {
       ? parseInt(process.env['SERVER_PORT'], 10)
       : fileOptions.server_port,
   navigation_timeout_ms: fileOptions.navigation_timeout_ms,
+  check_in_lead_seconds: fileOptions.check_in_lead_seconds,
 }
 
 // Log configuration source for debugging
@@ -161,10 +163,7 @@ if (hasEnvConfig) {
  * Valid values: IANA timezone names like "America/New_York", "Europe/London"
  * @see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
  */
-// Supervisor options must override the image's default TZ=Etc/UTC.
-const timezone = detectIsAddOn(process.env, optionsFile)
-  ? fileOptions.timezone || process.env.TZ
-  : process.env.TZ ?? fileOptions.timezone
+const timezone = process.env.TZ ?? options.timezone ?? fileOptions.timezone
 if (timezone) {
   // Validate timezone - invalid values silently fall back to UTC
   const isValid = isValidTimezone(timezone)
@@ -536,6 +535,14 @@ export const SCHEDULER_JITTER_MAX_MS: number = parseInt(
 export const SCHEDULER_COOLDOWN_DEFAULT_MS: number = 5 * 60 * 1000 // 5 minutes
 
 /**
+ * How long before a TRMNL device's check-in an aligned capture starts, so the
+ * image is rendered, uploaded and stored before the device asks for it. The
+ * `check_in_lead_seconds` option or CHECK_IN_LEAD_SECONDS overrides the 120 s default.
+ */
+export const SCHEDULER_CHECK_IN_LEAD_MS: number =
+  resolveCheckInLeadSeconds(options.check_in_lead_seconds, process.env['CHECK_IN_LEAD_SECONDS']) * 1000
+
+/**
  * Maximum retry attempts for failed schedules
  */
 export const SCHEDULER_MAX_RETRIES: number = 3
@@ -578,8 +585,3 @@ export const SCHEDULER_NETWORK_ERROR_PATTERNS: readonly string[] =
  * Re-exported from config-helpers for backward compatibility
  */
 export const isSchedulerNetworkError = isNetworkError
-
-/** Account credential is separate from HA authentication and never exposed by status. */
-export const TRMNL_ACCOUNT_TOKEN = process.env['TRMNL_ACCOUNT_TOKEN'] ?? fileOptions.trmnl_account_token ?? ''
-/** Optional alignment; ordinary cron/interval schedules remain unchanged. */
-export const REFRESH_SCHEDULES = fileOptions.refresh_schedules ?? []

@@ -17,14 +17,13 @@
  * @module scheduler
  */
 
-import { RefreshWorker, readAccountTiming } from './lib/scheduler/refresh-worker.js'
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadSchedules, updateSchedule } from './lib/scheduleStore.js'
 import { ScheduleExecutor, type ScreenshotFunction, type ExecutionResult } from './lib/scheduler/schedule-executor.js'
 import { JobManager } from './lib/scheduler/job-manager.js'
 import { CooldownTracker } from './lib/scheduler/cooldown-tracker.js'
+import { CheckInAligner } from './lib/scheduler/check-in-alignment.js'
 import {
   buildRefreshedAuthUpdate,
   canRelogin,
@@ -38,9 +37,8 @@ import {
   SCHEDULER_OUTPUT_DIR_NAME,
   SCHEDULER_JITTER_MAX_MS,
   SCHEDULER_COOLDOWN_DEFAULT_MS,
+  SCHEDULER_CHECK_IN_LEAD_MS,
   DATA_DIR,
-  REFRESH_SCHEDULES,
-  TRMNL_ACCOUNT_TOKEN,
 } from './const.js'
 import type { Schedule } from './types/domain.js'
 import { schedulerLogger } from './lib/logger.js'
@@ -82,7 +80,6 @@ export function jitterMs(maxMs: number, rand: () => number = Math.random): numbe
  * High-level scheduler orchestrating cron jobs and screenshot execution.
  */
 export class Scheduler {
-  #refreshWorker: RefreshWorker
   #outputDir: string
   #jobManager: JobManager
   #executor: ScheduleExecutor
@@ -91,6 +88,7 @@ export class Scheduler {
   #refreshingTokens = false
   #deadTokensWarned = new Set<string>()
   #cooldowns = new CooldownTracker(SCHEDULER_COOLDOWN_DEFAULT_MS)
+  #aligner = new CheckInAligner(SCHEDULER_CHECK_IN_LEAD_MS)
 
   /**
    * Creates scheduler instance with injected screenshot function.
@@ -101,13 +99,6 @@ export class Scheduler {
     this.#outputDir = path.join(DATA_DIR, SCHEDULER_OUTPUT_DIR_NAME)
     this.#jobManager = new JobManager()
     this.#executor = new ScheduleExecutor(screenshotFn, this.#outputDir)
-
-    this.#refreshWorker = new RefreshWorker(REFRESH_SCHEDULES, path.join(DATA_DIR, 'refresh-state.json'), {
-      readDevice: id => readAccountTiming(id, TRMNL_ACCOUNT_TOKEN),
-      execute: schedule => this.#executor.call(schedule),
-      loadSchedules,
-      now: () => new Date(),
-    })
 
     // Ensure output directory exists
     if (!fs.existsSync(this.#outputDir)) {
@@ -121,7 +112,7 @@ export class Scheduler {
   start(): void {
     log.info`Starting scheduler...`
     // Fire-and-forget initial load (errors logged by loadAndSchedule)
-    void this.#loadAndSchedule().then(() => this.#refreshWorker.tick())
+    void this.#loadAndSchedule()
     void this.#keepByosTokensFresh()
 
     // The same tick keeps BYOS tokens fresh: the server only accepts
@@ -129,7 +120,7 @@ export class Scheduler {
     // send time alone fails for schedules running less often than the
     // token lifetime
     this.#reloadInterval = setInterval(() => {
-      void this.#loadAndSchedule().then(() => this.#refreshWorker.tick())
+      void this.#loadAndSchedule()
       void this.#keepByosTokensFresh()
     }, SCHEDULER_RELOAD_INTERVAL_MS)
   }
@@ -141,18 +132,7 @@ export class Scheduler {
     log.info`Stopping scheduler...`
     clearInterval(this.#reloadInterval)
     this.#jobManager.stopAll()
-  }
-
-  /** Progress health for the existing process watchdog, independent of cloud availability. */
-  refreshHealth(): ReturnType<RefreshWorker['health']> { return this.#refreshWorker.health() }
-
-  /** Safe refresh timing diagnostics; never includes schedules or credentials. */
-  refreshStatus(): object {
-    const digest = createHash('sha256')
-    for (const file of ['./scheduler.ts', './const.ts', './lib/scheduler/refresh-worker.ts', './lib/scheduler/refresh-planner.ts', './lib/scheduler/schedule-executor.ts']) {
-      digest.update(fs.readFileSync(new URL(file, import.meta.url)))
-    }
-    return { source_sha256: digest.digest('hex'), timezone: process.env.TZ, ...this.#refreshWorker.status() }
+    this.#aligner.stopAll()
   }
 
   /**
@@ -196,6 +176,7 @@ export class Scheduler {
       if (!schedule.enabled) {
         log.debug`Schedule "${schedule.name}" is disabled`
         this.#jobManager.removeJob(schedule.id, schedule.name)
+        this.#aligner.clear(schedule.id)
         continue
       }
 
@@ -261,19 +242,19 @@ export class Scheduler {
   }
 
   /**
-   * Cron callback: loads the schedule, skips while cooling down, jitters, then
-   * executes.
+   * Cron or aligned-capture callback: loads the schedule, skips while cooling
+   * down or while an aligned capture is pending, jitters cron fires, then
+   * executes. A TRMNL upload reply naming the device's next check-in times the
+   * next capture to land just before it.
    *
    * The job closes over the id rather than the schedule so it survives a reload
    * without going stale.
    */
-  async #runSchedule(scheduleId: string): Promise<void> {
+  async #runSchedule(scheduleId: string, aligned = false): Promise<void> {
     const schedules = await loadSchedules()
     const schedule = schedules.find((s) => s.id === scheduleId)
-    if (!schedule?.enabled) return
-
-    if (this.#refreshWorker.owns(scheduleId)) {
-      await this.#refreshWorker.tick(scheduleId)
+    if (!schedule?.enabled) {
+      this.#aligner.clear(scheduleId)
       return
     }
 
@@ -283,18 +264,31 @@ export class Scheduler {
       return
     }
 
-    const delay = jitterMs(SCHEDULER_JITTER_MAX_MS)
+    if (schedule.align_to_check_in === false) this.#aligner.clear(schedule.id)
+    const pendingAt = this.#aligner.pendingAt(schedule.id)
+    if (!aligned && pendingAt !== null) {
+      log.info`Skipping cron for "${schedule.name}": capture aligned to the device check-in at ${new Date(pendingAt).toISOString()}`
+      return
+    }
+
+    const delay = aligned ? 0 : jitterMs(SCHEDULER_JITTER_MAX_MS)
     if (delay > 0) {
       log.debug`Jittering ${delay}ms before "${schedule.name}"`
       await sleep(delay)
     }
 
-    log.info`Cron triggered: ${schedule.name}`
+    log.info`${aligned ? 'Check-in aligned capture' : 'Cron triggered'}: ${schedule.name}`
     try {
       const result = await this.#executor.call(schedule)
       const cooldownUntil = this.#cooldowns.record(schedule.id, result.webhook)
       if (cooldownUntil !== null) {
         log.warn`Server asked "${schedule.name}" to back off (HTTP ${result.webhook?.statusCode}); pausing fires until ${new Date(cooldownUntil).toISOString()}`
+      }
+      if (result.durationMs !== undefined) this.#aligner.recordRunDuration(schedule.id, result.durationMs)
+      const nextCheckInAt = schedule.align_to_check_in === false ? undefined : result.webhook?.nextCheckInAt
+      const captureAt = this.#aligner.scheduleCapture(schedule.id, nextCheckInAt, () => void this.#runSchedule(schedule.id, true))
+      if (captureAt !== null) {
+        log.info`Next capture for "${schedule.name}" aligned to the device check-in: ${new Date(captureAt).toISOString()}`
       }
     } catch (err) {
       log.error`Schedule "${schedule.name}" failed: ${(err as Error).message}`

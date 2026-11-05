@@ -1,8 +1,9 @@
-name: "TRMNL HA (refresh preview)"
+name: "TRMNL HA (local log fix)"
 description: "Send dashboard screens to your TRMNL"
-version: "0.11.1-refresh.3"
+version: "0.12.0-local.1"
 slug: "trmnl-ha"
 url: "https://github.com/lunaroja/trmnl-home-assistant"
+# Source-built so the documented local credential-log patch is included.
 # NOTE: Uncomment after setting up Codenotary signing in CI
 # codenotary: dev@usetrmnl.com
 homeassistant_api: true
@@ -32,8 +33,6 @@ ports_description:
 
 # Configuration options
 options:
-  trmnl_account_token: ""
-  refresh_schedules: []
   access_token: ""
   home_assistant_url: "http://homeassistant:8123"
   timezone: ""
@@ -43,17 +42,10 @@ options:
   navigation_timeout_ms: 30000
   timestamp_overlay: false
   timestamp_12h: false
+  check_in_lead_seconds: 120
 
 # Schema for options validation
 schema:
-  trmnl_account_token: password?
-  refresh_schedules:
-    - schedule_id: str
-      device_id: int(1,)
-      lead_seconds: int(60,600)
-      fallback_interval_seconds: int(60,86400)
-      initial_intervals_seconds:
-        - int(60,86400)
   access_token: str
   home_assistant_url: str?
   timezone: str?
@@ -63,6 +55,7 @@ schema:
   navigation_timeout_ms: "int(10000,180000)?"
   timestamp_overlay: bool?
   timestamp_12h: bool?
+  check_in_lead_seconds: "int(30,600)?"
 
 # Exclude regeneratable data from HA backups
 backup_exclude:

@@ -14,7 +14,6 @@ import {
   buildParams,
 } from './services.js'
 import { sleep } from '../sleep.js'
-import { redactWebhookUrl } from './webhook-delivery.js'
 import {
   SCHEDULER_MAX_RETRIES,
   SCHEDULER_RETRY_DELAY_MS,
@@ -42,13 +41,14 @@ export interface ExecutionResult {
   success: boolean
   savedPath: string
   webhook?: WebhookResult
+  /** Capture, save and upload time, so an aligned capture can start early enough */
+  durationMs?: number
 }
 
 /**
  * Orchestrates schedule execution with retry logic.
  */
 export class ScheduleExecutor {
-  #running = new Set<string>()
   #screenshotFn: ScreenshotFunction
   #outputDir: string
 
@@ -59,19 +59,13 @@ export class ScheduleExecutor {
 
   /** Executes schedule with automatic retry on network failures */
   async call(schedule: Schedule): Promise<ExecutionResult> {
-    if (this.#running.has(schedule.id)) throw new Error('Schedule capture already running')
-    this.#running.add(schedule.id)
-    try { return await this.#call(schedule) }
-    finally { this.#running.delete(schedule.id) }
-  }
-
-  async #call(schedule: Schedule): Promise<ExecutionResult> {
     const startTime = Date.now()
     log.info`Running: ${schedule.name}`
 
     const result = await this.#executeWithRetry(schedule)
+    result.durationMs = Date.now() - startTime
 
-    this.#logResult(schedule.name, result, Date.now() - startTime)
+    this.#logResult(schedule.name, result, result.durationMs)
     return result
   }
 
@@ -84,8 +78,8 @@ export class ScheduleExecutor {
   /** Formats webhook status for logging */
   #formatWebhookStatus(webhook: WebhookResult | undefined): string {
     if (!webhook) return 'not configured'
-    if (webhook.success) return `${webhook.statusCode} OK`
-    return `FAILED (HTTP ${webhook.statusCode ?? "unknown"})`
+    if (webhook.success) return `${webhook.statusCode} OK → ${webhook.url}`
+    return `FAILED (${webhook.error}) → ${webhook.url}`
   }
 
   /** Retry wrapper for network failures */
@@ -210,9 +204,10 @@ export class ScheduleExecutor {
         success: true,
         statusCode: result.status,
         url: webhookUrl,
+        nextCheckInAt: result.nextCheckInAt,
       }
     } catch (err) {
-      const errorMessage = redactWebhookUrl((err as Error).message, webhookUrl)
+      const errorMessage = (err as Error).message
       log.error`Schedule "${schedule.name}" webhook failed: ${errorMessage}`
 
       // Network errors carry no status, so fall back to scraping the message.

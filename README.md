@@ -2,13 +2,11 @@
 
 # TRMNL HA
 
-> **Refresh scheduling preview fork:** this fork adds optional capture timing from
-> actual TRMNL account pings and refresh/sleep settings. See
-> [configuration and migration guidance](trmnl-ha/DOCS.md#optional-refresh-aware-scheduling-fork-preview).
-> Install this preview by adding `https://github.com/lunaroja/trmnl-home-assistant`
-> to Supervisor; it builds source locally. The upstream installation instructions
-> below continue to describe the official release. This is a tested preview pending
-> owner review, with no upstream submission yet.
+> **Local build of upstream v0.12.0:** server-provided check-in alignment is
+> unchanged from the release. This source build carries the isolated credential-log
+> patch documented in [LOCAL_PATCHES.md](LOCAL_PATCHES.md). The former account
+> polling scheduler is retired. Add this fork to Supervisor only when that local
+> patch is needed; upstream instructions below describe the official image.
 
 ![TRMNL Logo](https://github.com/usetrmnl/trmnl-home-assistant/blob/main/trmnl-ha/logo.png?raw=true)
 
